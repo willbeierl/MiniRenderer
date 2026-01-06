@@ -1,0 +1,10 @@
+^E:\DEV\PROJECTS\MINIRENDERER\BUILD\CMAKEFILES\37D9EF250E6EA2BA9EA285202EFAC9AF\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SE:/dev/projects/MiniRenderer -BE:/dev/projects/MiniRenderer/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file E:/dev/projects/MiniRenderer/build/MiniRenderer.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

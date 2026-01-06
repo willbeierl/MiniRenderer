@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"E:/dev/projects/MiniRenderer/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
