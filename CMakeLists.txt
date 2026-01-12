@@ -10,17 +10,22 @@ add_executable(MiniRenderer
     src/gfx/ShaderProgram.h
     src/gfx/Buffer.h
     src/gfx/Buffer.cpp
+    src/gfx/Texture2D.h
+    src/gfx/Texture2D.cpp
     src/gfx/VertexArray.h
     src/gfx/VertexArray.cpp
+    src/third_party/stb_image_impl.cpp
 )
 
 # Find packages provided by vcpkg
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(glad CONFIG REQUIRED)
+find_package(Stb REQUIRED)
 
 target_link_libraries(MiniRenderer PRIVATE glfw glad::glad glm::glm)
 target_compile_definitions(MiniRenderer PRIVATE ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+target_include_directories(MiniRenderer PRIVATE ${Stb_INCLUDE_DIR})
 
 
 add_custom_command(TARGET MiniRenderer POST_BUILD

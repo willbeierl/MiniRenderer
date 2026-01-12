@@ -6,10 +6,12 @@
 #include <string>
 #include "gfx/ShaderProgram.h"
 #include "gfx/Buffer.h"
+#include "gfx/Texture2D.h"
 #include "gfx/VertexArray.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <algorithm>
 
 static void glfwErrorCallback(int code, const char* description)
 {
@@ -150,11 +152,6 @@ int main()
         std::string(ASSETS_DIR) + "/shaders/basic.vert",
         std::string(ASSETS_DIR) + "/shaders/basic.frag"
     );
-
-    GLint uMVP = glGetUniformLocation(program.Id(), "uMVP");
-    if (uMVP == -1)
-        std::cerr << "Warning: uMVP uniform not found (maybe optimized out).\n";
-
     if (program.Id() == 0)
     {
         std::cerr << "Failed to create shader program.\n";
@@ -163,12 +160,34 @@ int main()
         return 1;
     }
 
+    Texture2D tex(std::string(ASSETS_DIR) + "/textures/checker.png");
+    if (tex.Id() == 0)
+    {
+        std::cerr << "Failed to load texture.\n";
+    }
+
+
+    GLint uMVP = glGetUniformLocation(program.Id(), "uMVP");
+    GLint uTime = glGetUniformLocation(program.Id(), "uTime");
+    GLint uPulse = glGetUniformLocation(program.Id(), "uPulse");
+    GLint uTex0 = glGetUniformLocation(program.Id(), "uTex0");
+
+    auto WarnIfMissing = [](GLint loc, const char* name)
+        {
+            if (loc == -1)
+                std::cerr << "Warning: " << name << " uniform not found (maybe optimized out).\n";
+        };
+    WarnIfMissing(uMVP, "uMVP");
+    WarnIfMissing(uTime, "uTime");
+    WarnIfMissing(uPulse, "uPulse");
+    WarnIfMissing(uTex0, "uTex0");
+
     float vertices[] = {
-        // x,     y,     z,      r,    g,    b
-        -0.5f, -0.5f, 0.0f,    1.0f, 0.0f, 0.0f, // bottom-left  (red)
-         0.5f, -0.5f, 0.0f,    0.0f, 1.0f, 0.0f, // bottom-right (green)
-         0.5f,  0.5f, 0.0f,    0.0f, 0.0f, 1.0f, // top-right    (blue)
-        -0.5f,  0.5f, 0.0f,    1.0f, 1.0f, 0.0f  // top-left     (yellow)
+        // x,     y,     z,      r, g, b,      u, v
+        -0.5f, -0.5f, 0.0f,     1, 0, 0,      0, 0,
+         0.5f, -0.5f, 0.0f,     0, 1, 0,      1, 0,
+         0.5f,  0.5f, 0.0f,     0, 0, 1,      1, 1,
+        -0.5f,  0.5f, 0.0f,     1, 1, 0,      0, 1
     };
 
     unsigned int indices[] = {
@@ -191,8 +210,9 @@ int main()
     ebo.SetData(indices, sizeof(indices), GL_STATIC_DRAW);
 
     // vertex layout
-    vao.SetAttribute(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), 0);
-    vao.SetAttribute(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), 3 * sizeof(float));
+    vao.SetAttribute(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), 0);
+    vao.SetAttribute(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), 3 * sizeof(float));
+    vao.SetAttribute(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), 6 * sizeof(float));
 
     // unbind to avoid accidental edits later
     Buffer::Unbind(GL_ARRAY_BUFFER);
@@ -201,11 +221,22 @@ int main()
     bool wasRDown = false;
     bool wasTDown = false;
     bool wireframe = false;
+    bool wasLDown = false; // L = reload texture
+
+    float pulseValue = 1.0f;
 
     // Basic render loop
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+
+        bool isLDown = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
+        if (isLDown && !wasLDown)
+        {
+            if (!tex.LoadFromFile(std::string(ASSETS_DIR) + "/textures/checker.png"))
+                std::cerr << "Texture reload failed.\n";
+        }
+        wasLDown = isLDown;
 
         bool isRDown = glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS;
         if (isRDown && !wasRDown)
@@ -230,10 +261,14 @@ int main()
         glfwGetFramebufferSize(window, &w, &h);
         float aspect = (h == 0) ? 1.0f : (static_cast<float>(w) / static_cast<float>(h));
 
-        float t = static_cast<float>(glfwGetTime());
+        float t = (float)glfwGetTime();
+
+        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)   pulseValue += 0.01f;
+        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) pulseValue -= 0.01f;
+        pulseValue = std::clamp(pulseValue, 0.0f, 100.0f);
 
         glm::mat4 model = glm::rotate(glm::mat4(1.0f), t, glm::vec3(0, 1, 0)); // rotate around Y
-        glm::mat4 proj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 100.0f);
+        glm::mat4 proj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 3.0f);
 
         glm::vec3 camPos = glm::vec3(0.0f, 0.0f, 2.0f);
         glm::vec3 camTarget = glm::vec3(0.0f, 0.0f, 0.0f);
@@ -244,7 +279,17 @@ int main()
         glm::mat4 mvp = proj * view * model;
 
         program.Use();
-        glUniformMatrix4fv(uMVP, 1, GL_FALSE, glm::value_ptr(mvp));
+
+        tex.Bind(0);
+
+        if (uTex0 != -1) 
+            glUniform1i(uTex0, 0);
+        if (uMVP != -1)
+            glUniformMatrix4fv(uMVP, 1, GL_FALSE, glm::value_ptr(mvp));
+        if (uTime != -1)
+            glUniform1f(uTime, t);
+        if (uPulse != -1)
+            glUniform1f(uPulse, pulseValue);
 
         vao.Bind();
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void*)0);
