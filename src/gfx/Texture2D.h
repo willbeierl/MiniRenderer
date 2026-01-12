@@ -18,9 +18,12 @@ public:
     bool LoadFromFile(const std::string& path);
 
     void Bind(GLuint slot = 0) const;
+    void SetFiltering(GLint minFilter, GLint magFilter) const;
     GLuint Id() const { return m_id; }
 
 private:
     void Destroy();
     GLuint m_id = 0;
 };
+
+

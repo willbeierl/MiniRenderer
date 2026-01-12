@@ -218,10 +218,13 @@ int main()
     Buffer::Unbind(GL_ARRAY_BUFFER);
     VertexArray::Unbind();
 
-    bool wasRDown = false;
-    bool wasTDown = false;
-    bool wireframe = false;
+    bool wasRDown = false; // reload shader
+    bool wasTDown = false; // wirefreame
     bool wasLDown = false; // L = reload texture
+    bool wasFDown = false; // texture filtering (NEAREST vs LINEAR)
+
+    bool wireframe = false;
+    bool nearest = false;
 
     float pulseValue = 1.0f;
 
@@ -229,6 +232,26 @@ int main()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+
+        bool isFDown = glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS;
+        if (isFDown && !wasFDown)
+        {
+            nearest = !nearest;
+
+            if (nearest)
+            {
+                // crisp pixels
+                tex.SetFiltering(GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST);
+                std::cout << "[Tex] Filtering: NEAREST\n";
+            }
+            else
+            {
+                // smooth sampling
+                tex.SetFiltering(GL_LINEAR_MIPMAP_LINEAR, GL_LINEAR);
+                std::cout << "[Tex] Filtering: LINEAR\n";
+            }
+        }
+        wasFDown = isFDown;
 
         bool isLDown = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
         if (isLDown && !wasLDown)
@@ -270,7 +293,8 @@ int main()
         glm::mat4 model = glm::rotate(glm::mat4(1.0f), t, glm::vec3(0, 1, 0)); // rotate around Y
         glm::mat4 proj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 3.0f);
 
-        glm::vec3 camPos = glm::vec3(0.0f, 0.0f, 2.0f);
+        //glm::vec3 camPos = glm::vec3(0.0f, 0.0f, 2.0f);
+        glm::vec3 camPos = glm::vec3(0.0f, 0.0f, 0.8f);
         glm::vec3 camTarget = glm::vec3(0.0f, 0.0f, 0.0f);
         glm::vec3 camUp = glm::vec3(0.0f, 1.0f, 0.0f);
 
