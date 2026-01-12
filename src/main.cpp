@@ -7,6 +7,9 @@
 #include "gfx/ShaderProgram.h"
 #include "gfx/Buffer.h"
 #include "gfx/VertexArray.h"
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 static void glfwErrorCallback(int code, const char* description)
 {
@@ -135,6 +138,8 @@ int main()
         return 1;
     }
 
+    glEnable(GL_DEPTH_TEST);
+
     int fbWidth = 0, fbHeight = 0;
     glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
     glViewport(0, 0, fbWidth, fbHeight);
@@ -146,6 +151,10 @@ int main()
         std::string(ASSETS_DIR) + "/shaders/basic.frag"
     );
 
+    GLint uMVP = glGetUniformLocation(program.Id(), "uMVP");
+    if (uMVP == -1)
+        std::cerr << "Warning: uMVP uniform not found (maybe optimized out).\n";
+
     if (program.Id() == 0)
     {
         std::cerr << "Failed to create shader program.\n";
@@ -155,11 +164,11 @@ int main()
     }
 
     float vertices[] = {
-        // x,     y,     z
-        -0.5f, -0.5f, 0.0f,  // 0 bottom-left
-         0.5f, -0.5f, 0.0f,  // 1 bottom-right
-         0.5f,  0.5f, 0.0f,  // 2 top-right
-        -0.5f,  0.5f, 0.0f   // 3 top-left
+        // x,     y,     z,      r,    g,    b
+        -0.5f, -0.5f, 0.0f,    1.0f, 0.0f, 0.0f, // bottom-left  (red)
+         0.5f, -0.5f, 0.0f,    0.0f, 1.0f, 0.0f, // bottom-right (green)
+         0.5f,  0.5f, 0.0f,    0.0f, 0.0f, 1.0f, // top-right    (blue)
+        -0.5f,  0.5f, 0.0f,    1.0f, 1.0f, 0.0f  // top-left     (yellow)
     };
 
     unsigned int indices[] = {
@@ -182,7 +191,8 @@ int main()
     ebo.SetData(indices, sizeof(indices), GL_STATIC_DRAW);
 
     // vertex layout
-    vao.SetAttribute(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
+    vao.SetAttribute(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), 0);
+    vao.SetAttribute(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), 3 * sizeof(float));
 
     // unbind to avoid accidental edits later
     Buffer::Unbind(GL_ARRAY_BUFFER);
@@ -200,7 +210,8 @@ int main()
         bool isRDown = glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS;
         if (isRDown && !wasRDown)
         {
-            program.Reload();
+            if (program.Reload())
+                uMVP = glGetUniformLocation(program.Id(), "uMVP");
         }
         wasRDown = isRDown;
 
@@ -213,9 +224,28 @@ int main()
         wasTDown = isTDown;
 
         glClearColor(0.01f, 0.15f, 0.12f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        int w = 0, h = 0;
+        glfwGetFramebufferSize(window, &w, &h);
+        float aspect = (h == 0) ? 1.0f : (static_cast<float>(w) / static_cast<float>(h));
+
+        float t = static_cast<float>(glfwGetTime());
+
+        glm::mat4 model = glm::rotate(glm::mat4(1.0f), t, glm::vec3(0, 1, 0)); // rotate around Y
+        glm::mat4 proj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 100.0f);
+
+        glm::vec3 camPos = glm::vec3(0.0f, 0.0f, 2.0f);
+        glm::vec3 camTarget = glm::vec3(0.0f, 0.0f, 0.0f);
+        glm::vec3 camUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
+        glm::mat4 view = glm::lookAt(camPos, camTarget, camUp);
+
+        glm::mat4 mvp = proj * view * model;
 
         program.Use();
+        glUniformMatrix4fv(uMVP, 1, GL_FALSE, glm::value_ptr(mvp));
+
         vao.Bind();
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void*)0);
 
