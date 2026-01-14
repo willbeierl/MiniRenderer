@@ -12,6 +12,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
+#include "gfx/Primitives.h"
 
 static void glfwErrorCallback(int code, const char* description)
 {
@@ -181,12 +182,22 @@ int main()
     }
 
 
+
+
+
+    Mesh cube = CreateCube();
+
+
+
+
+
     GLint uModel = glGetUniformLocation(program.Id(), "uModel");
     GLint uView = glGetUniformLocation(program.Id(), "uView");
     GLint uProj = glGetUniformLocation(program.Id(), "uProj");
     GLint uTex0 = glGetUniformLocation(program.Id(), "uTex0");
     GLint uLightDirWS = glGetUniformLocation(program.Id(), "uLightDirWS");
     GLint uCameraPosWS = glGetUniformLocation(program.Id(), "uCameraPosWS");
+    GLint uUseTexture = glGetUniformLocation(program.Id(), "uUseTexture");
 
 
     auto WarnIfMissing = [](GLint loc, const char* name)
@@ -200,44 +211,23 @@ int main()
     WarnIfMissing(uModel, "uModel");
     WarnIfMissing(uView, "uView");
     WarnIfMissing(uProj, "uProj");
+    WarnIfMissing(uUseTexture, "uUseTexture");
 
 
-    float vertices[] = {
-        // pos                 normal              uv
-        -0.5f,-0.5f,0.0f,     0,0,1,              0,0,
-         0.5f,-0.5f,0.0f,     0,0,1,              1,0,
-         0.5f, 0.5f,0.0f,     0,0,1,              1,1,
-        -0.5f, 0.5f,0.0f,     0,0,1,              0,1
-    };
+    
 
-    unsigned int indices[] = {
-    0, 1, 2,   // first triangle
-    2, 3, 0    // second triangle
-    };
+    
 
-    VertexArray vao;
-    Buffer vbo(GL_ARRAY_BUFFER);
-    Buffer ebo(GL_ELEMENT_ARRAY_BUFFER);
+    
 
-    vao.Bind();
+    float lightYaw = -45.0f;
+    float lightPitch = -45.0f;
 
-    // VBO data
-    vbo.Bind();
-    vbo.SetData(vertices, sizeof(vertices), GL_STATIC_DRAW);
+    
 
-    // EBO data 
-    ebo.Bind();
-    ebo.SetData(indices, sizeof(indices), GL_STATIC_DRAW);
+    
 
-    // vertex layout
-    vao.SetAttribute(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), 0);
-    vao.SetAttribute(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), 3 * sizeof(float));
-    vao.SetAttribute(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), 6 * sizeof(float));
-
-    // unbind to avoid accidental edits later
-    Buffer::Unbind(GL_ARRAY_BUFFER);
-    VertexArray::Unbind();
-
+  
     bool wasRDown = false; // reload shader
     bool wasTDown = false; // wirefreame
     bool wasLDown = false; // reload texture
@@ -245,6 +235,9 @@ int main()
 
     bool wasKDown = false; // Anisotropic filtering
     bool anisoOn = false;
+
+    bool wasUDown = false;
+    int useTexture = 1;
 
     bool wireframe = false;
     bool nearest = false;
@@ -296,6 +289,15 @@ int main()
 
 
 
+
+        bool isUDown = glfwGetKey(window, GLFW_KEY_U) == GLFW_PRESS;
+        if (isUDown && !wasUDown)
+        {
+            useTexture = 1 - useTexture;
+            std::cout << "[Mat] UseTexture: " << (useTexture ? "ON" : "OFF") << "\n";
+        }
+        wasUDown = isUDown;
+
         bool isKDown = glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS;
         if (isKDown && !wasKDown)
         {
@@ -344,13 +346,15 @@ int main()
                 uTex0 = glGetUniformLocation(program.Id(), "uTex0");
                 uLightDirWS = glGetUniformLocation(program.Id(), "uLightDirWS");
                 uCameraPosWS = glGetUniformLocation(program.Id(), "uCameraPosWS");
+                uUseTexture = glGetUniformLocation(program.Id(), "uUseTexture");
                              
                 WarnIfMissing(uTex0, "uTex0");
                 WarnIfMissing(uModel, "uModel");
                 WarnIfMissing(uView, "uView");
                 WarnIfMissing(uProj, "uProj");
                 WarnIfMissing(uLightDirWS, "uLightDirWS");
-                WarnIfMissing(uCameraPosWS, "uCameraPosWS");               
+                WarnIfMissing(uCameraPosWS, "uCameraPosWS"); 
+                WarnIfMissing(uUseTexture, "uUseTexture");
             }
         }
         wasRDown = isRDown;
@@ -362,6 +366,24 @@ int main()
             glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
         }
         wasTDown = isTDown;
+
+
+
+
+
+        float lightSpeed = 60.0f * dt;
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) lightYaw -= lightSpeed;
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) lightYaw += lightSpeed;
+        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) lightPitch += lightSpeed;
+        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) lightPitch -= lightSpeed;
+
+        lightPitch = std::clamp(lightPitch, -89.0f, 89.0f);
+
+        glm::vec3 lightDir;
+        lightDir.x = cos(glm::radians(lightYaw)) * cos(glm::radians(lightPitch));
+        lightDir.y = sin(glm::radians(lightPitch));
+        lightDir.z = sin(glm::radians(lightYaw)) * cos(glm::radians(lightPitch));
+        lightDir = glm::normalize(lightDir);
 
 
 
@@ -389,12 +411,18 @@ int main()
         if (uProj != -1)
             glUniformMatrix4fv(uProj, 1, GL_FALSE, glm::value_ptr(proj));
         if (uLightDirWS != -1)
-            glUniform3f(uLightDirWS, -0.3f, -1.0f, -0.2f);  // just a direction
+            glUniform3fv(uLightDirWS, 1, glm::value_ptr(lightDir));
         if (uCameraPosWS != -1)
-            glUniform3fv(uCameraPosWS, 1, glm::value_ptr(camPos));       
+            glUniform3fv(uCameraPosWS, 1, glm::value_ptr(camPos));
+        if (uUseTexture != -1)
+            glUniform1i(uUseTexture, useTexture);
 
-        vao.Bind();
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void*)0);
+
+
+        cube.Draw();
+            
+
+
 
         glfwSwapBuffers(window);
     }

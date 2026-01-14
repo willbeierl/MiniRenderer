@@ -8,10 +8,13 @@ out vec4 FragColor;
 uniform sampler2D uTex0;
 uniform vec3 uLightDirWS;   // direction of light (world)
 uniform vec3 uCameraPosWS;
+uniform int uUseTexture;
 
 void main()
 {
-    vec3 albedo = texture(uTex0, vUV).rgb;
+    vec3 albedo = (uUseTexture != 0)
+    ? texture(uTex0, vUV).rgb
+    : vec3(0.8, 0.2, 0.2); // solid test color
 
     vec3 N = normalize(vNormalWS);
     vec3 L = normalize(-uLightDirWS);

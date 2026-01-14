@@ -14,6 +14,10 @@ add_executable(MiniRenderer
     src/gfx/Texture2D.cpp
     src/gfx/VertexArray.h
     src/gfx/VertexArray.cpp
+    src/gfx/Mesh.h
+    src/gfx/Mesh.cpp
+    src/gfx/Primitives.h
+    src/gfx/Primitives.cpp
     src/third_party/stb_image_impl.cpp
 )
 
