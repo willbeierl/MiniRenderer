@@ -128,6 +128,8 @@ int main()
         return 1;
     }
 
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
 
@@ -142,6 +144,18 @@ int main()
 
     glEnable(GL_DEPTH_TEST);
 
+
+    float yaw = -90.0f;
+    float pitch = 0.0f;
+    bool firstMouse = true;
+    double lastX = 0.0, lastY = 0.0;
+
+    glm::vec3 camPos(0.0f, 0.0f, 3.0f);
+    glm::vec3 camFront(0.0f, 0.0f, -1.0f);
+    glm::vec3 camUp(0.0f, 1.0f, 0.0f);
+
+    float lastTime = (float)glfwGetTime();
+
     int fbWidth = 0, fbHeight = 0;
     glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
     glViewport(0, 0, fbWidth, fbHeight);
@@ -149,8 +163,8 @@ int main()
     std::cout << "OpenGL: " << glGetString(GL_VERSION) << "\n";
 
     ShaderProgram program(
-        std::string(ASSETS_DIR) + "/shaders/basic.vert",
-        std::string(ASSETS_DIR) + "/shaders/basic.frag"
+        std::string(ASSETS_DIR) + "/shaders/lit.vert",
+        std::string(ASSETS_DIR) + "/shaders/lit.frag"
     );
     if (program.Id() == 0)
     {
@@ -167,27 +181,33 @@ int main()
     }
 
 
-    GLint uMVP = glGetUniformLocation(program.Id(), "uMVP");
-    GLint uTime = glGetUniformLocation(program.Id(), "uTime");
-    GLint uPulse = glGetUniformLocation(program.Id(), "uPulse");
+    GLint uModel = glGetUniformLocation(program.Id(), "uModel");
+    GLint uView = glGetUniformLocation(program.Id(), "uView");
+    GLint uProj = glGetUniformLocation(program.Id(), "uProj");
     GLint uTex0 = glGetUniformLocation(program.Id(), "uTex0");
+    GLint uLightDirWS = glGetUniformLocation(program.Id(), "uLightDirWS");
+    GLint uCameraPosWS = glGetUniformLocation(program.Id(), "uCameraPosWS");
+
 
     auto WarnIfMissing = [](GLint loc, const char* name)
         {
             if (loc == -1)
                 std::cerr << "Warning: " << name << " uniform not found (maybe optimized out).\n";
-        };
-    WarnIfMissing(uMVP, "uMVP");
-    WarnIfMissing(uTime, "uTime");
-    WarnIfMissing(uPulse, "uPulse");
+        };  
     WarnIfMissing(uTex0, "uTex0");
+    WarnIfMissing(uCameraPosWS, "uCameraPosWS");
+    WarnIfMissing(uLightDirWS, "uLightDirWS");
+    WarnIfMissing(uModel, "uModel");
+    WarnIfMissing(uView, "uView");
+    WarnIfMissing(uProj, "uProj");
+
 
     float vertices[] = {
-        // x,     y,     z,      r, g, b,      u, v
-        -0.5f, -0.5f, 0.0f,     1, 0, 0,      0, 0,
-         0.5f, -0.5f, 0.0f,     0, 1, 0,      1, 0,
-         0.5f,  0.5f, 0.0f,     0, 0, 1,      1, 1,
-        -0.5f,  0.5f, 0.0f,     1, 1, 0,      0, 1
+        // pos                 normal              uv
+        -0.5f,-0.5f,0.0f,     0,0,1,              0,0,
+         0.5f,-0.5f,0.0f,     0,0,1,              1,0,
+         0.5f, 0.5f,0.0f,     0,0,1,              1,1,
+        -0.5f, 0.5f,0.0f,     0,0,1,              0,1
     };
 
     unsigned int indices[] = {
@@ -220,18 +240,70 @@ int main()
 
     bool wasRDown = false; // reload shader
     bool wasTDown = false; // wirefreame
-    bool wasLDown = false; // L = reload texture
+    bool wasLDown = false; // reload texture
     bool wasFDown = false; // texture filtering (NEAREST vs LINEAR)
+
+    bool wasKDown = false; // Anisotropic filtering
+    bool anisoOn = false;
 
     bool wireframe = false;
     bool nearest = false;
-
-    float pulseValue = 1.0f;
-
+   
     // Basic render loop
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+
+
+
+        float now = (float)glfwGetTime();
+        float dt = now - lastTime;
+        lastTime = now;
+
+        double x, y;
+        glfwGetCursorPos(window, &x, &y);
+
+        if (firstMouse) { lastX = x; lastY = y; firstMouse = false; }
+
+        float xoffset = (float)(x - lastX);
+        float yoffset = (float)(lastY - y);
+        lastX = x; lastY = y;
+
+        float sensitivity = 0.08f;
+        xoffset *= sensitivity;
+        yoffset *= sensitivity;
+
+        yaw += xoffset;
+        pitch += yoffset;
+
+        if (pitch > 89.0f) pitch = 89.0f;
+        if (pitch < -89.0f) pitch = -89.0f;
+
+        glm::vec3 front;
+        front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+        front.y = sin(glm::radians(pitch));
+        front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+        camFront = glm::normalize(front);
+
+        float speed = 3.0f * dt;
+        glm::vec3 right = glm::normalize(glm::cross(camFront, camUp));
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camPos += camFront * speed;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camPos -= camFront * speed;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camPos += right * speed;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camPos -= right * speed;
+
+
+
+
+        bool isKDown = glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS;
+        if (isKDown && !wasKDown)
+        {
+            anisoOn = !anisoOn;
+            tex.SetAnisotropy(anisoOn ? 16.0f : 1.0f);
+            std::cout << "[Tex] Aniso: " << (anisoOn ? "ON" : "OFF") << "\n";
+        }
+        wasKDown = isKDown;
 
         bool isFDown = glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS;
         if (isFDown && !wasFDown)
@@ -265,7 +337,21 @@ int main()
         if (isRDown && !wasRDown)
         {
             if (program.Reload())
-                uMVP = glGetUniformLocation(program.Id(), "uMVP");
+            {                             
+                uModel = glGetUniformLocation(program.Id(), "uModel");
+                uView = glGetUniformLocation(program.Id(), "uView");
+                uProj = glGetUniformLocation(program.Id(), "uProj");               
+                uTex0 = glGetUniformLocation(program.Id(), "uTex0");
+                uLightDirWS = glGetUniformLocation(program.Id(), "uLightDirWS");
+                uCameraPosWS = glGetUniformLocation(program.Id(), "uCameraPosWS");
+                             
+                WarnIfMissing(uTex0, "uTex0");
+                WarnIfMissing(uModel, "uModel");
+                WarnIfMissing(uView, "uView");
+                WarnIfMissing(uProj, "uProj");
+                WarnIfMissing(uLightDirWS, "uLightDirWS");
+                WarnIfMissing(uCameraPosWS, "uCameraPosWS");               
+            }
         }
         wasRDown = isRDown;
 
@@ -277,43 +363,35 @@ int main()
         }
         wasTDown = isTDown;
 
+
+
+
         glClearColor(0.01f, 0.15f, 0.12f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         int w = 0, h = 0;
         glfwGetFramebufferSize(window, &w, &h);
         float aspect = (h == 0) ? 1.0f : (static_cast<float>(w) / static_cast<float>(h));
-
-        float t = (float)glfwGetTime();
-
-        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)   pulseValue += 0.01f;
-        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) pulseValue -= 0.01f;
-        pulseValue = std::clamp(pulseValue, 0.0f, 100.0f);
-
-        glm::mat4 model = glm::rotate(glm::mat4(1.0f), t, glm::vec3(0, 1, 0)); // rotate around Y
-        glm::mat4 proj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 3.0f);
-
-        //glm::vec3 camPos = glm::vec3(0.0f, 0.0f, 2.0f);
-        glm::vec3 camPos = glm::vec3(0.0f, 0.0f, 0.8f);
-        glm::vec3 camTarget = glm::vec3(0.0f, 0.0f, 0.0f);
-        glm::vec3 camUp = glm::vec3(0.0f, 1.0f, 0.0f);
-
-        glm::mat4 view = glm::lookAt(camPos, camTarget, camUp);
-
-        glm::mat4 mvp = proj * view * model;
-
+                
+        glm::mat4 model(1.0f);  // no rotation)
+        glm::mat4 proj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 100.0f);
+        glm::mat4 view = glm::lookAt(camPos, camPos + camFront, camUp);
+       
         program.Use();
-
         tex.Bind(0);
 
         if (uTex0 != -1) 
             glUniform1i(uTex0, 0);
-        if (uMVP != -1)
-            glUniformMatrix4fv(uMVP, 1, GL_FALSE, glm::value_ptr(mvp));
-        if (uTime != -1)
-            glUniform1f(uTime, t);
-        if (uPulse != -1)
-            glUniform1f(uPulse, pulseValue);
+        if (uModel != -1)
+            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(model));
+        if (uView != -1)
+            glUniformMatrix4fv(uView, 1, GL_FALSE, glm::value_ptr(view));
+        if (uProj != -1)
+            glUniformMatrix4fv(uProj, 1, GL_FALSE, glm::value_ptr(proj));
+        if (uLightDirWS != -1)
+            glUniform3f(uLightDirWS, -0.3f, -1.0f, -0.2f);  // just a direction
+        if (uCameraPosWS != -1)
+            glUniform3fv(uCameraPosWS, 1, glm::value_ptr(camPos));       
 
         vao.Bind();
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void*)0);

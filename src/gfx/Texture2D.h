@@ -19,6 +19,7 @@ public:
 
     void Bind(GLuint slot = 0) const;
     void SetFiltering(GLint minFilter, GLint magFilter) const;
+    void SetAnisotropy(float level) const;
     GLuint Id() const { return m_id; }
 
 private:

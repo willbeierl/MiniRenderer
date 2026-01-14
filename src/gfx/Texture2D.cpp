@@ -48,6 +48,27 @@ void Texture2D::SetFiltering(GLint minFilter, GLint magFilter) const
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magFilter);
 }
 
+void Texture2D::SetAnisotropy(float level) const
+{
+    glBindTexture(GL_TEXTURE_2D, m_id);
+
+    // Extension constant (commonly available)
+#ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
+#endif
+#ifndef GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
+#endif
+
+    float maxA = 1.0f;
+    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxA);
+
+    if (level < 1.0f) level = 1.0f;
+    if (level > maxA) level = maxA;
+
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, level);
+}
+
 bool Texture2D::LoadFromFile(const std::string& path)
 {
     // Destroy old texture if reloading
