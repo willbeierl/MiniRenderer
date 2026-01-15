@@ -13,6 +13,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
 #include "gfx/Primitives.h"
+#include <vector>
 
 static void glfwErrorCallback(int code, const char* description)
 {
@@ -106,6 +107,24 @@ std::string LoadTextFile(const std::string& path)
     return buffer.str();
 }
 
+struct Transform
+{
+    glm::vec3 position{ 0.0f };
+    glm::vec3 rotationEuler{ 0.0f }; // radians: x,y,z
+    glm::vec3 scale{ 1.0f };
+};
+
+static glm::mat4 MakeModelMatrix(const Transform& t)
+{
+    glm::mat4 M(1.0f);
+    M = glm::translate(M, t.position);
+    M = glm::rotate(M, t.rotationEuler.x, glm::vec3(1, 0, 0));
+    M = glm::rotate(M, t.rotationEuler.y, glm::vec3(0, 1, 0));
+    M = glm::rotate(M, t.rotationEuler.z, glm::vec3(0, 0, 1));
+    M = glm::scale(M, t.scale);
+    return M;
+}
+
 int main()
 {
     glfwSetErrorCallback(glfwErrorCallback);
@@ -146,6 +165,43 @@ int main()
     glEnable(GL_DEPTH_TEST);
 
 
+
+    const unsigned int SHADOW_SIZE = 1024;   // try 1024 first, later 2048
+    const float SHADOW_NEAR = 0.1f;
+    const float SHADOW_FAR = 50.0f;         // must be >= your scene extents
+
+    GLuint shadowFBO = 0;
+    GLuint shadowCube = 0;
+
+    glGenFramebuffers(1, &shadowFBO);
+    glGenTextures(1, &shadowCube);
+
+    glBindTexture(GL_TEXTURE_CUBE_MAP, shadowCube);
+    for (int i = 0; i < 6; i++)
+    {
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0,
+            GL_DEPTH_COMPONENT24, SHADOW_SIZE, SHADOW_SIZE, 0,
+            GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    }
+
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, shadowFBO);
+    glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, shadowCube, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cerr << "Shadow cubemap FBO incomplete!\n";
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
+
     float yaw = -90.0f;
     float pitch = 0.0f;
     bool firstMouse = true;
@@ -175,6 +231,20 @@ int main()
         return 1;
     }
 
+
+    ShaderProgram shadowProg(
+        std::string(ASSETS_DIR) + "/shaders/shadow_cube.vert",
+        std::string(ASSETS_DIR) + "/shaders/shadow_cube.frag"
+    );
+    if (shadowProg.Id() == 0) 
+    {
+        std::cerr << "Failed to create shader program.\n";
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
+
+
     Texture2D tex(std::string(ASSETS_DIR) + "/textures/checker.png");
     if (tex.Id() == 0)
     {
@@ -182,22 +252,40 @@ int main()
     }
 
 
-
-
-
     Mesh cube = CreateCube();
 
+    struct RenderItem
+    {
+        Transform transform;
+        Mesh* mesh = nullptr;
+    };
+    std::vector<RenderItem> scene;
 
+    // Cube 1
+    scene.push_back({ Transform{ glm::vec3(0,0,0), glm::vec3(0,0,0), glm::vec3(1,1,1) }, &cube });
+    // Cube 2 (offset)
+    scene.push_back({ Transform{ glm::vec3(2,0,0), glm::vec3(0,0,0), glm::vec3(1,1,1) }, &cube });
+    // “Floor” (just a scaled cube)
+    scene.push_back({ Transform{ glm::vec3(0,-1.0f,0), glm::vec3(0,0,0), glm::vec3(10.0f, 0.1f, 10.0f) }, &cube });
 
 
 
     GLint uModel = glGetUniformLocation(program.Id(), "uModel");
     GLint uView = glGetUniformLocation(program.Id(), "uView");
     GLint uProj = glGetUniformLocation(program.Id(), "uProj");
-    GLint uTex0 = glGetUniformLocation(program.Id(), "uTex0");
-    GLint uLightDirWS = glGetUniformLocation(program.Id(), "uLightDirWS");
+    GLint uTex0 = glGetUniformLocation(program.Id(), "uTex0");   
     GLint uCameraPosWS = glGetUniformLocation(program.Id(), "uCameraPosWS");
     GLint uUseTexture = glGetUniformLocation(program.Id(), "uUseTexture");
+    GLint uLightPosWS = glGetUniformLocation(program.Id(), "uLightPosWS");
+    GLint uLightColor = glGetUniformLocation(program.Id(), "uLightColor");
+    GLint uIsLight = glGetUniformLocation(program.Id(), "uIsLight");
+    GLint uShadowCube = glGetUniformLocation(program.Id(), "uShadowCube");
+    GLint uFarPlane = glGetUniformLocation(program.Id(), "uFarPlane");
+
+    GLint sh_uModel = glGetUniformLocation(shadowProg.Id(), "uModel");
+    GLint sh_uLightVP = glGetUniformLocation(shadowProg.Id(), "uLightVP");
+    GLint sh_uLightPos = glGetUniformLocation(shadowProg.Id(), "uLightPosWS");
+    GLint sh_uFarPlane = glGetUniformLocation(shadowProg.Id(), "uFarPlane");
 
 
     auto WarnIfMissing = [](GLint loc, const char* name)
@@ -207,27 +295,28 @@ int main()
         };  
     WarnIfMissing(uTex0, "uTex0");
     WarnIfMissing(uCameraPosWS, "uCameraPosWS");
-    WarnIfMissing(uLightDirWS, "uLightDirWS");
     WarnIfMissing(uModel, "uModel");
     WarnIfMissing(uView, "uView");
     WarnIfMissing(uProj, "uProj");
     WarnIfMissing(uUseTexture, "uUseTexture");
+    WarnIfMissing(uLightPosWS, "uLightPosWS");
+    WarnIfMissing(uLightColor, "uLightColor");
+    WarnIfMissing(uShadowCube, "uShadowCube");
+    WarnIfMissing(uFarPlane, "uFarPlane");
+
+    WarnIfMissing(sh_uModel, "sh_uModel");
+    WarnIfMissing(sh_uLightVP, "sh_uLightVP");
+    WarnIfMissing(sh_uLightPos, "sh_uLightPos");
+    WarnIfMissing(sh_uFarPlane, "sh_uFarPlane");
+
+
 
 
     
-
+    glm::vec3 lightPos(1.5f, 1.5f, 1.5f);
+    glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
     
 
-    
-
-    float lightYaw = -45.0f;
-    float lightPitch = -45.0f;
-
-    
-
-    
-
-  
     bool wasRDown = false; // reload shader
     bool wasTDown = false; // wirefreame
     bool wasLDown = false; // reload texture
@@ -344,17 +433,35 @@ int main()
                 uView = glGetUniformLocation(program.Id(), "uView");
                 uProj = glGetUniformLocation(program.Id(), "uProj");               
                 uTex0 = glGetUniformLocation(program.Id(), "uTex0");
-                uLightDirWS = glGetUniformLocation(program.Id(), "uLightDirWS");
                 uCameraPosWS = glGetUniformLocation(program.Id(), "uCameraPosWS");
                 uUseTexture = glGetUniformLocation(program.Id(), "uUseTexture");
+                uLightPosWS = glGetUniformLocation(program.Id(), "uLightPosWS");
+                uLightColor = glGetUniformLocation(program.Id(), "uLightColor");
+                uIsLight = glGetUniformLocation(program.Id(), "uIsLight");
+                uShadowCube = glGetUniformLocation(program.Id(), "uShadowCube");
+                uFarPlane = glGetUniformLocation(program.Id(), "uFarPlane");
+
+                sh_uModel = glGetUniformLocation(shadowProg.Id(), "uModel");
+                sh_uLightVP = glGetUniformLocation(shadowProg.Id(), "uLightVP");
+                sh_uLightPos = glGetUniformLocation(shadowProg.Id(), "uLightPosWS");
+                sh_uFarPlane = glGetUniformLocation(shadowProg.Id(), "uFarPlane");
                              
                 WarnIfMissing(uTex0, "uTex0");
                 WarnIfMissing(uModel, "uModel");
                 WarnIfMissing(uView, "uView");
                 WarnIfMissing(uProj, "uProj");
-                WarnIfMissing(uLightDirWS, "uLightDirWS");
                 WarnIfMissing(uCameraPosWS, "uCameraPosWS"); 
                 WarnIfMissing(uUseTexture, "uUseTexture");
+                WarnIfMissing(uLightPosWS, "uLightPosWS");
+                WarnIfMissing(uLightColor, "uLightColor");
+                WarnIfMissing(uIsLight, "uIsLight");
+                WarnIfMissing(uShadowCube, "uShadowCube");
+                WarnIfMissing(uFarPlane, "uFarPlane");
+
+                WarnIfMissing(sh_uModel, "sh_uModel");
+                WarnIfMissing(sh_uLightVP, "sh_uLightVP");
+                WarnIfMissing(sh_uLightPos, "sh_uLightPos");
+                WarnIfMissing(sh_uFarPlane, "sh_uFarPlane");
             }
         }
         wasRDown = isRDown;
@@ -367,24 +474,17 @@ int main()
         }
         wasTDown = isTDown;
 
+        
+        float lightSpeed = 3.0f * dt;
 
 
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) lightPos.x -= lightSpeed;
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) lightPos.x += lightSpeed;
+        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) lightPos.z -= lightSpeed;
+        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) lightPos.z += lightSpeed;
 
-
-        float lightSpeed = 60.0f * dt;
-        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) lightYaw -= lightSpeed;
-        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) lightYaw += lightSpeed;
-        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) lightPitch += lightSpeed;
-        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) lightPitch -= lightSpeed;
-
-        lightPitch = std::clamp(lightPitch, -89.0f, 89.0f);
-
-        glm::vec3 lightDir;
-        lightDir.x = cos(glm::radians(lightYaw)) * cos(glm::radians(lightPitch));
-        lightDir.y = sin(glm::radians(lightPitch));
-        lightDir.z = sin(glm::radians(lightYaw)) * cos(glm::radians(lightPitch));
-        lightDir = glm::normalize(lightDir);
-
+        if (glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS) lightPos.y += lightSpeed;
+        if (glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS) lightPos.y -= lightSpeed;
 
 
 
@@ -394,34 +494,122 @@ int main()
         int w = 0, h = 0;
         glfwGetFramebufferSize(window, &w, &h);
         float aspect = (h == 0) ? 1.0f : (static_cast<float>(w) / static_cast<float>(h));
-                
-        glm::mat4 model(1.0f);  // no rotation)
+                       
         glm::mat4 proj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 100.0f);
         glm::mat4 view = glm::lookAt(camPos, camPos + camFront, camUp);
+
+
+
+
+
+        glm::mat4 lightProj = glm::perspective(glm::radians(90.0f), 1.0f, SHADOW_NEAR, SHADOW_FAR);
+        glm::mat4 shadowVP[6] = {
+            lightProj * glm::lookAt(lightPos, lightPos + glm::vec3(1, 0, 0), glm::vec3(0,-1, 0)),
+            lightProj * glm::lookAt(lightPos, lightPos + glm::vec3(-1, 0, 0), glm::vec3(0,-1, 0)),
+            lightProj * glm::lookAt(lightPos, lightPos + glm::vec3(0, 1, 0), glm::vec3(0, 0, 1)),
+            lightProj * glm::lookAt(lightPos, lightPos + glm::vec3(0,-1, 0), glm::vec3(0, 0,-1)),
+            lightProj * glm::lookAt(lightPos, lightPos + glm::vec3(0, 0, 1), glm::vec3(0,-1, 0)),
+            lightProj * glm::lookAt(lightPos, lightPos + glm::vec3(0, 0,-1), glm::vec3(0,-1, 0)),
+        };
+
+        glViewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
+        glBindFramebuffer(GL_FRAMEBUFFER, shadowFBO);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        // Optional: reduce acne
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+
+        shadowProg.Use();
+        if (sh_uLightPos != -1) glUniform3fv(sh_uLightPos, 1, glm::value_ptr(lightPos));
+        if (sh_uFarPlane != -1) glUniform1f(sh_uFarPlane, SHADOW_FAR);
+
+        for (int face = 0; face < 6; face++)
+        {
+            if (sh_uLightVP != -1)
+                glUniformMatrix4fv(sh_uLightVP, 1, GL_FALSE, glm::value_ptr(shadowVP[face]));
+
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, shadowCube, 0);
+            glClear(GL_DEPTH_BUFFER_BIT);
+
+            for (auto& item : scene)
+            {
+                // IMPORTANT: do NOT render the light gizmo cube into the shadow map
+                // (just skip that separate draw you do for the gizmo)
+                glm::mat4 model = MakeModelMatrix(item.transform);
+                if (sh_uModel != -1)
+                    glUniformMatrix4fv(sh_uModel, 1, GL_FALSE, glm::value_ptr(model));
+
+                item.mesh->Draw();
+            }
+        }
+        glCullFace(GL_BACK);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+            
+
+
+        glfwGetFramebufferSize(window, &w, &h);
+        glViewport(0, 0, w, h);    
        
         program.Use();
         tex.Bind(0);
 
+
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, shadowCube);
+
+        if (uShadowCube != -1) 
+            glUniform1i(uShadowCube, 1);
+        if (uFarPlane != -1) 
+            glUniform1f(uFarPlane, SHADOW_FAR);
+
+
+
         if (uTex0 != -1) 
-            glUniform1i(uTex0, 0);
-        if (uModel != -1)
-            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(model));
+            glUniform1i(uTex0, 0);       
         if (uView != -1)
             glUniformMatrix4fv(uView, 1, GL_FALSE, glm::value_ptr(view));
         if (uProj != -1)
-            glUniformMatrix4fv(uProj, 1, GL_FALSE, glm::value_ptr(proj));
-        if (uLightDirWS != -1)
-            glUniform3fv(uLightDirWS, 1, glm::value_ptr(lightDir));
-        if (uCameraPosWS != -1)
-            glUniform3fv(uCameraPosWS, 1, glm::value_ptr(camPos));
+            glUniformMatrix4fv(uProj, 1, GL_FALSE, glm::value_ptr(proj));            
         if (uUseTexture != -1)
             glUniform1i(uUseTexture, useTexture);
 
+        if (uLightPosWS != -1) 
+            glUniform3fv(uLightPosWS, 1, glm::value_ptr(lightPos));
+        if (uLightColor != -1) 
+            glUniform3fv(uLightColor, 1, glm::value_ptr(lightColor));
+        if (uCameraPosWS != -1) 
+            glUniform3fv(uCameraPosWS, 1, glm::value_ptr(camPos));
 
+
+        scene[1].transform.rotationEuler.y = (float)glfwGetTime(); // rotate cube 2
+        if (uIsLight != -1) glUniform1i(uIsLight, 0);
+
+        for (auto& item : scene)
+        {
+            glm::mat4 model = MakeModelMatrix(item.transform);
+
+            if (uModel != -1)
+                glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(model));
+
+            item.mesh->Draw();
+        }
+
+
+        glm::mat4 lightModel(1.0f);
+        lightModel = glm::translate(lightModel, lightPos);
+        lightModel = glm::scale(lightModel, glm::vec3(0.12f)); // small cube
+
+        if (uModel != -1) 
+            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(lightModel));
+        if (uIsLight != -1) 
+            glUniform1i(uIsLight, 1);
 
         cube.Draw();
-            
 
+        if (uIsLight != -1) glUniform1i(uIsLight, 0);
 
 
         glfwSwapBuffers(window);
